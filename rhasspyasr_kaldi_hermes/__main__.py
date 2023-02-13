@@ -48,7 +48,10 @@ def get_args() -> argparse.Namespace:
         "--graph-dir",
         help="Path to directory with HCLG.fst (defaults to $model_dir/graph)",
     )
-
+    parser.add_argument(
+        "--model-config",
+        help="Model configuration for VOSK (defaults to $model_dir/conf/model.conf)",
+    )
     # Training settings
     parser.add_argument(
         "--dictionary", help="Path to write pronunciation dictionary file (training)"

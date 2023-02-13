@@ -1,5 +1,7 @@
 """Hermes MQTT server for Rhasspy ASR using Kaldi"""
 import gzip
+import zipfile
+import hashlib
 import logging
 import os
 import threading
@@ -653,12 +655,38 @@ class AsrHermesMqtt(HermesClient):
                 rhasspyasr_kaldi.train_prepare_online_decoding(
                     self.model_dir, self.graph_dir, kaldi_dir
                 )
-
-            yield (AsrTrainSuccess(id=train.id), {"site_id": site_id})
+            model_url="model.zip"
+            model_md5 = self.zip_model(self.model_dir.parents[1] / model_url)
+            yield (AsrTrainSuccess(id=train.id,model_md5=model_md5,model_url="profile/"+model_url), {"site_id": site_id})
         except Exception as e:
             _LOGGER.exception("train")
             yield AsrError(error=str(e), site_id=site_id, session_id=train.id)
 
+    def zip_model(self,file):
+        if not os.path.isfile(self.model_dir / "conf/model.conf"):
+            config = ["--min-active=200", "--max-active=3000", "--beam=10.0", "--lattice-beam=2.0", "--acoustic-scale=1.0", "--frame-subsampling-factor=3", "--endpoint.silence-phones=1:2:3:4:5:6:7:8:9:10", "--endpoint.rule2.min-trailing-silence=0.5", "--endpoint.rule3.min-trailing-silence=1.0", "--endpoint.rule4.min-trailing-silence=2.0"]
+            with open(self.model_dir / "conf/model.conf","w") as f:
+                for l in config:
+                    f.write(l)
+                    f.write("\n")
+        with zipfile.ZipFile(file=file,mode="w") as zip_file:
+            zip_file.write(self.model_dir / "online/final.mdl","am/final.mdl")
+            zip_file.write(self.model_dir / "online/conf/mfcc.conf","conf/mfcc.conf")
+            zip_file.write(self.model_dir / "conf/model.conf" ,"conf/model.conf")
+            zip_file.write(self.model_dir / "online/conf/splice.conf","ivector/splice.conf")
+            for root, dirs, files in os.walk(self.model_dir / "online/ivector_extractor") :
+                for f in files:
+                    if f != "splice_opts" :
+                        zip_file.write(os.path.join(root,f),os.path.join("ivector" , f))
+            zip_file.write(self.model_dir / "data/lang/G.fst","graph/Gr.fst")
+            zip_file.write(self.model_dir / "graph/HCLG.fst","graph/HCLGr.fst")
+            for root, dirs, files in os.walk(self.model_dir / "graph") :
+                for f in files:
+                    if f != "HCLG.fst" :
+                        zip_file.write(os.path.join(root,f),os.path.join(os.path.relpath(root,self.model_dir) , f))
+        with open(file,"rb") as f:
+            return hashlib.md5(f.read()).hexdigest()
+ 
     async def handle_pronounce(
         self, pronounce: G2pPronounce
     ) -> typing.AsyncIterable[typing.Union[G2pPhonemes, G2pError]]:
